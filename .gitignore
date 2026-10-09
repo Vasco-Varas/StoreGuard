@@ -1,0 +1,19 @@
+node_modules
+dist
+.env
+.env.*
+.replbox/shots
+
+# Local/editor tooling
+.vscode
+.aiderignore
+
+# Downloaded model weights (fetched automatically by tools/generate_detections.py)
+*.pt
+
+# Byte-identical to frontend/public/cameras/*.mp4
+Videos/
+
+# Python
+__pycache__
+*.pyc

@@ -1,0 +1,84 @@
+# StoreGuard
+
+StoreGuard is a SaaS platform that lets convenience stores connect all of their security cameras to one dashboard and watch for shoplifting — without hiring more staff or buying more hardware.
+
+This repository contains a **working mock** used to pitch the solution: it demonstrates the full user experience with realistic footage and simulated (non-AI) detection, so the concepts can be shown and sold before the real computer-vision pipeline is built.
+
+## Features (as demonstrated in the mock)
+
+- **Camera connection** — a store's security cameras (mocked by the videos in `Videos/`) are "connected" to the SaaS and shown in a live dashboard.
+- **Area markup** — the store owner manually marks up camera areas on a still frame of the video, e.g. drawing a polygon around a display or shelf, so detections can be tied to specific merchandise.
+- **People detection (YOLO, mocked)** — people are detected in the feed. In the mock this is simulated; the production version will run a YOLO model.
+- **Pose detection (mocked)** — the pose of each detected person is shown to reason about what they are doing. Also simulated in the mock.
+- **Stealing likelihood indicator** — a per-person risk indicator that estimates how likely it is someone is stealing.
+- **Cashier indicator** — recognises the cashier so the system does not flag them as a thief or a customer.
+- **Store map** — a manually drawn map of the store, created in a custom editing UI.
+- **Heatmap mode** — click on the store map to mark where something was stolen; the map renders a heatmap of the stolen-from areas so the store can see its most targeted zones and act on it (rearrange stock, place staff, move cameras).
+
+## How the mock works
+
+The mock is intentionally simple:
+
+- Camera feeds are pre-recorded video files (`Videos/camera_1/*.mp4`), chosen so some clip clearly shows a theft and some do not. These files are served as if they were live camera streams.
+- Detection (people, pose, risk, cashier) is scripted/simulated on top of the footage — there is **no real AI in this repository**. The mock's job is to show the product's behaviour and interaction; the detection pipeline is what the pitch is selling. As an optional upgrade, [real YOLO detections](#real-detections-optional-run-on-your-own-gpu) can be generated for the same clips on your own GPU machine; the app picks them up automatically.
+- Area markup, the store map and the theft heatmap are real, interactive UI so the store owner can try the actual workflows end-to-end.
+
+## Real detections (optional, run on your own GPU)
+
+The same demo clips can be overlaid with *real* YOLO person detection and 17-point pose, generated offline on a GPU machine:
+
+1. `pip install ultralytics opencv-python numpy`
+2. `python tools/generate_detections.py` — runs `yolov8n-pose` over every clip in `frontend/public/cameras/` (flags: `--model yolov8s-pose`, `--fps 15`, `--clip vid_crime_1`, `--device cpu`, …) and writes `frontend/public/detections/<clip>.json`: boxes and skeletons per sampled frame, with stable person IDs within a clip.
+3. The app detects the files (via `/api/detections`, so a missing file never raises a 404) and switches that camera to the real overlays automatically — delete the JSON for a clip at any time to return it to the scripted mock.
+
+Two things stay scripted even in this mode, by design:
+
+- **Stealing risk is never generated.** It is a pitch prop; the scripted "thief" risk curve is applied to the tracked person closest to where the scripted theft ends (`thiefTrackId` is picked automatically per clip, adjustable with `--thief-x` / `--thief-y`).
+- **The cashier rule uses the same fixed cashier region** as the mock: whoever's real track stands inside it is rendered as staff and excluded from risk.
+
+The script is also the starting point for the production pipeline (live stream → YOLO+pose → tracker).
+
+## Tech stack
+
+A pnpm workspace with two packages:
+
+- `frontend/` — React + TypeScript on Vite (dev server on port 5173, the preview). `/api` is proxied to the server.
+- `server/` — Express API in TypeScript (port 8000). Reads `POSTGRES_URL` if you add a Postgres service from the project's Services dialog (none is attached by default).
+
+## Getting started
+
+```sh
+pnpm install
+pnpm dev        # both servers, with reload
+pnpm build      # production build of both
+pnpm start      # serve the built app on :8000
+pnpm test       # Vitest, once, for both packages
+```
+
+Tests are Vitest: put `*.test.ts` (or `.test.tsx`) next to the code in `frontend/` or `server/`, and run them from the Testing pane or with `pnpm test`. `server/src/app.test.ts` starts the API on a free port and calls it, as an example. A test that needs a DOM can start with `// @vitest-environment jsdom`.
+
+## Project structure
+
+```
+frontend/            React app (dashboard, camera view, markup, store map, heatmap)
+  public/detections/ Real YOLO detection JSON, generated by tools/generate_detections.py (optional)
+server/              Express API
+  src/app.ts         API routes (createApp), static frontend serving
+  src/index.ts       Server entry point
+tools/
+  generate_detections.py  GPU script: real YOLO boxes + 17-point pose -> frontend/public/detections/
+Videos/
+  camera_1/          Mock camera footage (theft and non-theft clips)
+```
+
+## Roadmap (post-pitch)
+
+Things the mock simulates that the real product would implement:
+
+1. Live camera ingestion (RTSP/ONVIF or vendor SDKs) replacing the demo video files.
+2. Real YOLO-based people detection and pose estimation, on GPU.
+3. The stealing-likelihood model trained on labelled shoplifting events.
+4. Automatic theft logging from camera detection (with the manual click on the map kept as a fallback when the AI misses one).
+5. Cashier recognition (badge/position-based and/or face-embedding based).
+6. Per-store data persistence and multi-store dashboards (Postgres).
+7. Alerts and incident clips stored for review.
